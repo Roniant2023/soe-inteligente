@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { initialSOEForm, type SOEForm } from "@/lib/types";
 import {
   tiposObservacion,
@@ -17,8 +17,21 @@ type SOEAIAction =
 export default function Page() {
   const [form, setForm] = useState<SOEForm>(initialSOEForm);
   const [loadingAction, setLoadingAction] = useState<SOEAIAction | null>(null);
+  const [saving, setSaving] = useState(false);
   const [uiError, setUiError] = useState<string | null>(null);
   const [uiInfo, setUiInfo] = useState<string | null>(null);
+  const [photoFiles, setPhotoFiles] = useState<File[]>([]);
+  const [analyzingImage, setAnalyzingImage] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      form.fotos.forEach((foto) => {
+        if (foto.previewUrl?.startsWith("blob:")) {
+          URL.revokeObjectURL(foto.previewUrl);
+        }
+      });
+    };
+  }, [form.fotos]);
 
   const handleChange = (
     e: React.ChangeEvent<
@@ -32,6 +45,132 @@ export default function Page() {
       [name]: value,
     }));
   };
+
+  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+
+    if (!files.length) return;
+
+    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+
+    if (!imageFiles.length) {
+      setUiError("Solo se permiten archivos de imagen.");
+      return;
+    }
+
+    const nuevasFotos = imageFiles.map((file) => ({
+      name: file.name,
+      previewUrl: URL.createObjectURL(file),
+    }));
+
+    setPhotoFiles((prev) => [...prev, ...imageFiles]);
+
+    setForm((prev) => ({
+      ...prev,
+      fotos: [...prev.fotos, ...nuevasFotos],
+    }));
+
+    setUiError(null);
+    setUiInfo("✅ Foto(s) cargada(s) correctamente.");
+
+    e.target.value = "";
+  };
+
+  const removePhoto = (index: number) => {
+    setPhotoFiles((prev) => prev.filter((_, i) => i !== index));
+
+    setForm((prev) => {
+      const foto = prev.fotos[index];
+      if (foto?.previewUrl?.startsWith("blob:")) {
+        URL.revokeObjectURL(foto.previewUrl);
+      }
+
+      return {
+        ...prev,
+        fotos: prev.fotos.filter((_, i) => i !== index),
+      };
+    });
+  };
+
+  const fileToBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+
+      reader.onload = () => {
+        const result = reader.result;
+        if (typeof result !== "string") {
+          reject(new Error("No se pudo leer la imagen."));
+          return;
+        }
+
+        const base64 = result.split(",")[1];
+        if (!base64) {
+          reject(new Error("No se pudo convertir la imagen a base64."));
+          return;
+        }
+
+        resolve(base64);
+      };
+
+      reader.onerror = () => reject(new Error("Error leyendo archivo."));
+      reader.readAsDataURL(file);
+    });
+
+  async function analyzeImageWithAI() {
+    setUiError(null);
+    setUiInfo(null);
+
+    if (!photoFiles.length) {
+      setUiError("Primero carga al menos una foto.");
+      return;
+    }
+
+    try {
+      setAnalyzingImage(true);
+
+      const file = photoFiles[0];
+      const imageBase64 = await fileToBase64(file);
+
+      const res = await fetch("/api/analyze-image", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          imageBase64,
+          mimeType: file.type || "image/jpeg",
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data?.ok) {
+        setUiError(data?.details || data?.error || "No se pudo analizar la imagen.");
+        return;
+      }
+
+      const result = data.result || {};
+
+      setForm((prev) => ({
+        ...prev,
+        descripcion_mejorada:
+          String(result.descripcion_visual || "").trim() ||
+          prev.descripcion_mejorada,
+        accion_inmediata:
+          String(result.accion_inmediata || "").trim() ||
+          prev.accion_inmediata,
+        recomendacion:
+          String(result.recomendacion || "").trim() ||
+          prev.recomendacion,
+      }));
+
+      setUiInfo("✅ Imagen analizada correctamente con IA.");
+    } catch (err: any) {
+      setUiError(`Error analizando imagen: ${String(err?.message || err)}`);
+    } finally {
+      setAnalyzingImage(false);
+    }
+  }
 
   async function runAI(action: SOEAIAction) {
     setUiError(null);
@@ -120,9 +259,45 @@ export default function Page() {
     }
   }
 
-  function handleSave() {
-    setUiInfo("Siguiente paso: conectar guardado en Supabase.");
-    setUiError(null);
+  async function handleSaveSOE() {
+    try {
+      setSaving(true);
+      setUiError(null);
+      setUiInfo(null);
+
+      const res = await fetch("/api/save-soe", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ form }),
+      });
+
+      const text = await res.text();
+
+      let parsed: any = null;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        setUiError(`Respuesta no JSON: ${text}`);
+        return;
+      }
+
+      if (!res.ok || !parsed?.ok) {
+        setUiError(
+          parsed?.details ||
+            parsed?.error ||
+            `Error guardando observación (HTTP ${res.status})`
+        );
+        return;
+      }
+
+      setUiInfo("✅ Observación guardada correctamente en Supabase.");
+    } catch (err: any) {
+      setUiError(`Excepción guardando observación: ${String(err?.message || err)}`);
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -405,6 +580,67 @@ export default function Page() {
           </button>
         </div>
 
+        <div className="border rounded p-4 space-y-4">
+          <div className="font-semibold">Registro fotográfico</div>
+
+          <div className="text-sm text-neutral-600">
+            Adjunta fotos como evidencia. En celular podrás tomar la foto o seleccionarla desde la galería.
+          </div>
+
+          <input
+            type="file"
+            accept="image/*"
+            multiple
+            capture="environment"
+            onChange={handlePhotoSelect}
+            className="border p-2 rounded w-full"
+          />
+
+          <button
+            type="button"
+            onClick={analyzeImageWithAI}
+            disabled={analyzingImage || photoFiles.length === 0}
+            className="bg-black text-white px-4 py-2 rounded disabled:opacity-50"
+          >
+            {analyzingImage ? "Analizando imagen..." : "Analizar imagen con IA"}
+          </button>
+
+          {form.fotos.length > 0 && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {form.fotos.map((foto, index) => (
+                <div
+                  key={`${foto.name}-${index}`}
+                  className="border rounded p-2 space-y-2"
+                >
+                  <div className="relative w-full h-32 overflow-hidden rounded border bg-neutral-50">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={foto.previewUrl}
+                      alt={foto.name}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+
+                  <div
+                    className="text-xs text-neutral-600 truncate"
+                    title={foto.name}
+                  >
+                    {foto.name}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => removePhoto(index)}
+                    className="w-full border rounded px-2 py-1 text-xs hover:bg-neutral-50"
+                  >
+                    Eliminar
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         <div className="border rounded p-4 space-y-3">
           <div className="font-semibold">Control y seguimiento</div>
 
@@ -453,10 +689,11 @@ export default function Page() {
 
         <button
           type="button"
-          onClick={handleSave}
-          className="w-full bg-black text-white py-3 rounded font-medium"
+          onClick={handleSaveSOE}
+          disabled={saving}
+          className="w-full bg-black text-white py-3 rounded font-medium disabled:opacity-50"
         >
-          Guardar Observación
+          {saving ? "Guardando..." : "Guardar Observación"}
         </button>
       </section>
     </div>

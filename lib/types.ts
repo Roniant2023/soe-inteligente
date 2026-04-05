@@ -1,3 +1,8 @@
+export type SOEPhotoItem = {
+  name: string;
+  previewUrl: string;
+};
+
 export type SOEForm = {
   fecha: string;
   nombre: string;
@@ -25,6 +30,9 @@ export type SOEForm = {
   requiere_seguimiento: string;
   requiere_ail: string;
   estado: string;
+
+  // 👇 listo para fotos
+  fotos: SOEPhotoItem[];
 };
 
 export const initialSOEForm: SOEForm = {
@@ -54,4 +62,6 @@ export const initialSOEForm: SOEForm = {
   requiere_seguimiento: "",
   requiere_ail: "",
   estado: "Abierto",
+
+  fotos: [],
 };
