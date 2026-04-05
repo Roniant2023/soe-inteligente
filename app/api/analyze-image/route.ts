@@ -51,9 +51,10 @@ Instrucciones:
               text: prompt,
             },
             {
-              type: "input_image",
-              image_url: `data:${mimeType};base64,${imageBase64}`,
-            },
+  type: "input_image",
+  image_url: `data:${mimeType};base64,${imageBase64}`,
+  detail: "auto",
+},
           ],
         },
       ],
