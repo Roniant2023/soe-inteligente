@@ -300,8 +300,9 @@ export default function Page() {
     }
   }
 
-  return (
-    <div className="max-w-5xl mx-auto p-6 space-y-6">
+return (
+  <main className="min-h-screen bg-white text-neutral-900">
+    <div className="max-w-5xl mx-auto p-6 space-y-6 bg-white">
       <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold">SOE Inteligente</h1>
@@ -697,5 +698,6 @@ export default function Page() {
         </button>
       </section>
     </div>
+  </main>
   );
 }
